@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>PaymentLedger.Api</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PaymentLedger.Application\PaymentLedger.Application.csproj" />
+    <ProjectReference Include="..\PaymentLedger.Infrastructure\PaymentLedger.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
