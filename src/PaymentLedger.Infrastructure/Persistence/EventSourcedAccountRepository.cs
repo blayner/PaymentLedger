@@ -1,10 +1,14 @@
+using Microsoft.Extensions.Logging;
 using PaymentLedger.Application.Abstractions;
 using PaymentLedger.Domain.Abstractions;
 using PaymentLedger.Domain.Accounts;
 
 namespace PaymentLedger.Infrastructure.Persistence;
 
-public sealed class EventSourcedAccountRepository(IEventStore eventStore) : IAccountRepository
+public sealed class EventSourcedAccountRepository(
+    IEventStore eventStore,
+    IProjectionRunner projections,
+    ILogger<EventSourcedAccountRepository> logger) : IAccountRepository
 {
     public async Task<Account?> GetAsync(Guid accountId, CancellationToken cancellationToken)
     {
@@ -29,6 +33,18 @@ public sealed class EventSourcedAccountRepository(IEventStore eventStore) : IAcc
         foreach (var account in accounts)
         {
             account.MarkCommitted();
+        }
+
+        // Read-your-writes for this instance: project before the command returns.
+        // The write is already durable, so a projection failure must not fail the command;
+        // the background poller will pick the events up on its next tick.
+        try
+        {
+            await projections.CatchUpAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Inline projection failed after a successful append");
         }
     }
 }
