@@ -1,6 +1,7 @@
 using PaymentLedger.Application.Abstractions;
 using PaymentLedger.Application.Common;
 using PaymentLedger.Application.ReadModels;
+using PaymentLedger.Domain.Ledger;
 
 namespace PaymentLedger.Infrastructure.ReadModels;
 
@@ -48,6 +49,23 @@ public sealed class InMemoryLedgerReadModelStore : ILedgerReadModelStore
                 ? entries.ToArray()
                 : [];
             return Task.FromResult(result);
+        }
+    }
+
+    public Task<IReadOnlyList<LedgerTotals>> GetTotalsAsync(CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            IReadOnlyList<LedgerTotals> totals = _byTransaction.Values
+                .SelectMany(entries => entries)
+                .GroupBy(e => e.Currency, StringComparer.Ordinal)
+                .Select(g => new LedgerTotals(
+                    g.Key,
+                    g.Where(e => e.EntryType == EntryType.Debit).Sum(e => e.Amount),
+                    g.Where(e => e.EntryType == EntryType.Credit).Sum(e => e.Amount),
+                    g.LongCount()))
+                .ToArray();
+            return Task.FromResult(totals);
         }
     }
 

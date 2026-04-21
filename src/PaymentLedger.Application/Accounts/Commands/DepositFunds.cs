@@ -2,6 +2,7 @@ using PaymentLedger.Application.Abstractions;
 using PaymentLedger.Application.Common;
 using PaymentLedger.Application.Contracts;
 using PaymentLedger.Application.Messaging;
+using PaymentLedger.Domain.Ledger;
 using PaymentLedger.Domain.ValueObjects;
 
 namespace PaymentLedger.Application.Accounts.Commands;
@@ -12,23 +13,35 @@ public sealed record DepositFundsCommand(
     decimal Amount,
     string Currency,
     Guid TransactionId,
-    string? Description) : ICommand<TransactionResult>;
+    string? Description) : ICommand<TransactionResult>, IRetryOnConcurrency;
 
-public sealed class DepositFundsCommandHandler(IAccountRepository accounts)
-    : ICommandHandler<DepositFundsCommand, TransactionResult>
+public sealed class DepositFundsCommandHandler(
+    IAccountRepository accounts,
+    LedgerPostingService posting,
+    TimeProvider clock) : ICommandHandler<DepositFundsCommand, TransactionResult>
 {
     public async Task<TransactionResult> Handle(DepositFundsCommand request, CancellationToken cancellationToken)
     {
-        var account = await accounts.GetRequiredAsync(request.AccountId, cancellationToken);
+        var customer = await accounts.GetRequiredAsync(request.AccountId, cancellationToken);
 
-        if (account.HasApplied(request.TransactionId))
+        if (customer.HasApplied(request.TransactionId))
         {
-            return new TransactionResult(request.TransactionId, account.Id, account.Balance.Amount, account.Currency, AlreadyProcessed: true);
+            return new TransactionResult(request.TransactionId, customer.Id, customer.Balance.Amount, customer.Currency, AlreadyProcessed: true);
         }
 
-        account.Deposit(new Money(request.Amount, request.Currency), request.TransactionId, request.Description ?? "Deposit");
-        await accounts.SaveAsync([account], cancellationToken);
+        var settlement = await accounts.GetOrOpenSettlementAsync(request.Currency, cancellationToken);
 
-        return new TransactionResult(request.TransactionId, account.Id, account.Balance.Amount, account.Currency, AlreadyProcessed: false);
+        var transaction = PostingRules.Deposit(
+            request.TransactionId,
+            customer.Id,
+            settlement.Id,
+            new Money(request.Amount, request.Currency),
+            request.Description ?? "Deposit",
+            clock.GetUtcNow());
+
+        posting.Post(transaction, [customer, settlement]);
+        await accounts.SaveAsync([customer, settlement], cancellationToken);
+
+        return new TransactionResult(request.TransactionId, customer.Id, customer.Balance.Amount, customer.Currency, AlreadyProcessed: false);
     }
 }
