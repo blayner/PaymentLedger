@@ -1,13 +1,19 @@
 using System.Runtime.CompilerServices;
 using PaymentLedger.Domain.Abstractions;
+using PaymentLedger.Infrastructure.Outbox;
+using PaymentLedger.Infrastructure.Serialization;
 
 namespace PaymentLedger.Infrastructure.EventStore;
 
 /// <summary>
 /// Process-local event store used for development and tests. A single lock makes
-/// multi-stream appends atomic, which mirrors the guarantee of the database-backed store.
+/// multi-stream appends atomic and writes the matching outbox messages under the same
+/// lock, which mirrors the transactional guarantee of the database-backed store.
 /// </summary>
-public sealed class InMemoryEventStore(TimeProvider clock) : IEventStore
+public sealed class InMemoryEventStore(
+    TimeProvider clock,
+    InMemoryOutboxStore outbox,
+    EventSerializer serializer) : IEventStore
 {
     private readonly object _gate = new();
     private readonly Dictionary<Guid, List<StoredEvent>> _streams = [];
@@ -42,6 +48,7 @@ public sealed class InMemoryEventStore(TimeProvider clock) : IEventStore
             }
 
             var recordedAt = clock.GetUtcNow();
+            var outboxMessages = new List<OutboxMessage>();
 
             foreach (var append in appends)
             {
@@ -57,8 +64,19 @@ public sealed class InMemoryEventStore(TimeProvider clock) : IEventStore
                     var stored = new StoredEvent(append.StreamId, ++version, _log.Count + 1, @event, recordedAt);
                     stream.Add(stored);
                     _log.Add(stored);
+
+                    outboxMessages.Add(new OutboxMessage
+                    {
+                        Id = @event.EventId,
+                        StreamId = append.StreamId,
+                        MessageType = serializer.GetEventType(@event),
+                        Payload = serializer.Serialize(@event),
+                        OccurredAt = @event.OccurredAt,
+                    });
                 }
             }
+
+            outbox.Enqueue(outboxMessages);
         }
 
         return Task.CompletedTask;
