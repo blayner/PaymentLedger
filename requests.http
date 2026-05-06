@@ -1,0 +1,44 @@
+@baseUrl = http://localhost:5080
+
+### Open an account
+# @name alice
+POST {{baseUrl}}/api/accounts
+Content-Type: application/json
+
+{ "ownerName": "Alice", "currency": "BRL" }
+
+### Open a second account
+# @name bob
+POST {{baseUrl}}/api/accounts
+Content-Type: application/json
+
+{ "ownerName": "Bob", "currency": "BRL" }
+
+### Deposit (replaying the same Idempotency-Key returns 200 instead of posting twice)
+POST {{baseUrl}}/api/accounts/{{alice.response.body.id}}/deposits
+Content-Type: application/json
+Idempotency-Key: 7d0c6f3e-2a51-4f5e-9a0b-0d2b1c3e4f50
+
+{ "amount": 250.00, "currency": "BRL", "description": "Initial top-up" }
+
+### Transfer
+POST {{baseUrl}}/api/transfers
+Content-Type: application/json
+Idempotency-Key: 1b6e2f6a-8f7c-4d1a-b3a2-5c9e0f4d2a11
+
+{
+  "sourceAccountId": "{{alice.response.body.id}}",
+  "destinationAccountId": "{{bob.response.body.id}}",
+  "amount": 75.50,
+  "currency": "BRL",
+  "description": "Dinner"
+}
+
+### Strongly consistent balance (from the event stream)
+GET {{baseUrl}}/api/accounts/{{alice.response.body.id}}/balance
+
+### Ledger entries for an account
+GET {{baseUrl}}/api/ledger/accounts/{{alice.response.body.id}}/entries
+
+### Trial balance: debits must equal credits per currency
+GET {{baseUrl}}/api/ledger/trial-balance

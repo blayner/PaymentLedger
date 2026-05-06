@@ -1,3 +1,4 @@
+using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
 using PaymentLedger.Application.Abstractions;
 using PaymentLedger.Application.Behaviors;
@@ -11,7 +12,13 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
-        services.AddMessaging(typeof(DependencyInjection).Assembly, typeof(ConcurrencyRetryBehavior<,>));
+        var assembly = typeof(DependencyInjection).Assembly;
+
+        // Order matters: behaviours wrap each other in registration order.
+        // Validation runs once; only the handler itself is retried on conflicts.
+        services.AddMessaging(assembly, typeof(ValidationBehavior<,>), typeof(ConcurrencyRetryBehavior<,>));
+
+        services.AddValidatorsFromAssembly(assembly, includeInternalTypes: true);
 
         services.AddSingleton<LedgerPostingService>();
 
