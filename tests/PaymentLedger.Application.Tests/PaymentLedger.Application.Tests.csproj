@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\PaymentLedger.Application\PaymentLedger.Application.csproj" />
+    <ProjectReference Include="..\..\src\PaymentLedger.Infrastructure\PaymentLedger.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
