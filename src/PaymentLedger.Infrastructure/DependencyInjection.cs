@@ -1,10 +1,12 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using PaymentLedger.Application.Abstractions;
 using PaymentLedger.Domain.Abstractions;
 using PaymentLedger.Infrastructure.EventStore;
 using PaymentLedger.Infrastructure.Outbox;
 using PaymentLedger.Infrastructure.Persistence;
+using PaymentLedger.Infrastructure.Persistence.Postgres;
 using PaymentLedger.Infrastructure.ReadModels;
 using PaymentLedger.Infrastructure.Serialization;
 
@@ -17,10 +19,22 @@ public static class DependencyInjection
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton(_ => new EventSerializer());
 
-        // Event store + outbox (in-memory: both share one lock for atomicity)
-        services.AddSingleton<InMemoryOutboxStore>();
-        services.AddSingleton<IOutboxStore>(sp => sp.GetRequiredService<InMemoryOutboxStore>());
-        services.AddSingleton<IEventStore, InMemoryEventStore>();
+        var persistence = configuration.GetSection(PersistenceOptions.SectionName).Get<PersistenceOptions>()
+                          ?? new PersistenceOptions();
+
+        // Event store + outbox. The schema initializer is a hosted service and must be
+        // registered before the projection and outbox workers below.
+        if (persistence.Provider == PersistenceProvider.Postgres)
+        {
+            AddPostgres(services, configuration);
+        }
+        else
+        {
+            services.AddSingleton<InMemoryOutboxStore>();
+            services.AddSingleton<IOutboxStore>(sp => sp.GetRequiredService<InMemoryOutboxStore>());
+            services.AddSingleton<IEventStore, InMemoryEventStore>();
+        }
+
         services.AddScoped<IAccountRepository, EventSourcedAccountRepository>();
 
         // Read side
@@ -35,5 +49,20 @@ public static class DependencyInjection
         services.AddHostedService<OutboxProcessor>();
 
         return services;
+    }
+
+    private static void AddPostgres(IServiceCollection services, IConfiguration configuration)
+    {
+        var connectionString = configuration.GetConnectionString(PersistenceOptions.ConnectionStringName);
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new InvalidOperationException(
+                $"ConnectionStrings:{PersistenceOptions.ConnectionStringName} is required when Persistence:Provider is Postgres.");
+        }
+
+        services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
+        services.AddHostedService<DatabaseInitializer>();
+        services.AddSingleton<IEventStore, PostgresEventStore>();
+        services.AddSingleton<IOutboxStore, PostgresOutboxStore>();
     }
 }
