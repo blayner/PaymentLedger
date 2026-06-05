@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  build-and-unit-test:
+    name: Build & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore PaymentLedger.sln
+
+      - name: Build
+        run: dotnet build PaymentLedger.sln --configuration Release --no-restore
+
+      - name: Unit tests
+        run: |
+          for project in tests/PaymentLedger.Domain.Tests tests/PaymentLedger.Application.Tests; do
+            dotnet test "$project" --configuration Release --no-build \
+              --logger "trx;LogFilePrefix=$(basename "$project")" \
+              --collect "XPlat Code Coverage" \
+              --results-directory TestResults
+          done
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: TestResults
+
+  integration-test:
+    name: Integration tests (PostgreSQL via Testcontainers)
+    runs-on: ubuntu-latest
+    needs: build-and-unit-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Integration tests
+        run: |
+          dotnet test tests/PaymentLedger.Integration.Tests --configuration Release \
+            --logger "trx;LogFilePrefix=integration" \
+            --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: TestResults
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    needs: build-and-unit-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build --tag payment-ledger:${{ github.sha }} .
