@@ -4,6 +4,7 @@ using Npgsql;
 using PaymentLedger.Application.Abstractions;
 using PaymentLedger.Domain.Abstractions;
 using PaymentLedger.Infrastructure.EventStore;
+using PaymentLedger.Infrastructure.Health;
 using PaymentLedger.Infrastructure.Outbox;
 using PaymentLedger.Infrastructure.Persistence;
 using PaymentLedger.Infrastructure.Persistence.Postgres;
@@ -48,6 +49,9 @@ public static class DependencyInjection
         services.AddSingleton<IIntegrationEventPublisher, LoggingIntegrationEventPublisher>();
         services.AddHostedService<OutboxProcessor>();
 
+        services.AddHealthChecks()
+            .AddCheck<OutboxHealthCheck>("outbox", tags: [HealthTags.Ready]);
+
         return services;
     }
 
@@ -64,5 +68,8 @@ public static class DependencyInjection
         services.AddHostedService<DatabaseInitializer>();
         services.AddSingleton<IEventStore, PostgresEventStore>();
         services.AddSingleton<IOutboxStore, PostgresOutboxStore>();
+
+        services.AddHealthChecks()
+            .AddCheck<PostgresHealthCheck>("postgres", tags: [HealthTags.Ready]);
     }
 }

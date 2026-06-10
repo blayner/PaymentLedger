@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using PaymentLedger.Application.Common;
+using PaymentLedger.Application.Diagnostics;
 using PaymentLedger.Application.Messaging;
 using PaymentLedger.Domain.Abstractions;
 
@@ -37,6 +38,7 @@ public sealed class ConcurrencyRetryBehavior<TRequest, TResponse>(
             catch (ConcurrencyException ex) when (attempt < MaxAttempts)
             {
                 var delay = Backoff(attempt);
+                PaymentLedgerTelemetry.ConcurrencyRetries.Add(1, new KeyValuePair<string, object?>("request", typeof(TRequest).Name));
                 logger.LogInformation(
                     "Concurrency conflict on stream {StreamId} handling {Request} (attempt {Attempt}/{Max}); retrying in {Delay} ms",
                     ex.StreamId,

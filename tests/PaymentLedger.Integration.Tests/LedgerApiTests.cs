@@ -144,6 +144,28 @@ public sealed class LedgerApiTests(PostgresFixture postgres) : IAsyncLifetime
         account.Balance.ShouldBe(42m);
     }
 
+    [Fact]
+    public async Task Readiness_reports_postgres_and_outbox()
+    {
+        var response = await _api.Http.GetAsync("/health/ready");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var report = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var checks = report.GetProperty("checks").EnumerateArray().Select(c => c.GetProperty("name").GetString()).ToArray();
+        checks.ShouldBe(new[] { "outbox", "postgres" }, ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task Responses_echo_the_correlation_id()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/health/live");
+        request.Headers.Add("X-Correlation-Id", "test-correlation-123");
+
+        var response = await _api.Http.SendAsync(request);
+
+        response.Headers.GetValues("X-Correlation-Id").ShouldHaveSingleItem().ShouldBe("test-correlation-123");
+    }
+
     private static async Task<T> PollAsync<T>(Func<Task<T?>> read)
     {
         for (var attempt = 0; ; attempt++)

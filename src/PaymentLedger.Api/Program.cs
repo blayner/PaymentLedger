@@ -1,9 +1,13 @@
 using System.Text.Json.Serialization;
 using PaymentLedger.Api.ErrorHandling;
+using PaymentLedger.Api.Observability;
 using PaymentLedger.Application;
 using PaymentLedger.Infrastructure;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.AddObservability();
 
 builder.Services
     .AddApplication()
@@ -20,6 +24,14 @@ builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
+app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseSerilogRequestLogging(options =>
+    options.GetLevel = (context, _, exception) =>
+        exception is not null || context.Response.StatusCode >= 500
+            ? Serilog.Events.LogEventLevel.Error
+            : context.Request.Path.StartsWithSegments("/health")
+                ? Serilog.Events.LogEventLevel.Verbose
+                : Serilog.Events.LogEventLevel.Information);
 app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
@@ -28,6 +40,7 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+app.MapHealthEndpoints();
 app.MapControllers();
 
 app.Run();

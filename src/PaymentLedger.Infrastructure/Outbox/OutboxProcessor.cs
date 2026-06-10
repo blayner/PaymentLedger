@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using PaymentLedger.Application.Diagnostics;
 
 namespace PaymentLedger.Infrastructure.Outbox;
 
@@ -13,6 +14,9 @@ public sealed class OutboxOptions
     public int BatchSize { get; set; } = 100;
 
     public int MaxAttempts { get; set; } = 10;
+
+    /// <summary>Oldest pending message age above which the readiness check reports Degraded.</summary>
+    public TimeSpan MaxHealthyLag { get; set; } = TimeSpan.FromMinutes(1);
 }
 
 /// <summary>
@@ -43,6 +47,9 @@ public sealed class OutboxProcessor(
                         _options.MaxAttempts,
                         publisher.PublishAsync,
                         stoppingToken);
+
+                    PaymentLedgerTelemetry.OutboxPublished.Add(result.Succeeded);
+                    PaymentLedgerTelemetry.OutboxFailed.Add(result.Failed);
 
                     if (result.Failed > 0)
                     {

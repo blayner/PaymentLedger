@@ -15,8 +15,12 @@ public static class DependencyInjection
         var assembly = typeof(DependencyInjection).Assembly;
 
         // Order matters: behaviours wrap each other in registration order.
-        // Validation runs once; only the handler itself is retried on conflicts.
-        services.AddMessaging(assembly, typeof(ValidationBehavior<,>), typeof(ConcurrencyRetryBehavior<,>));
+        // Telemetry sees the whole request; validation runs once; only the handler is retried.
+        services.AddMessaging(
+            assembly,
+            typeof(TelemetryBehavior<,>),
+            typeof(ValidationBehavior<,>),
+            typeof(ConcurrencyRetryBehavior<,>));
 
         services.AddValidatorsFromAssembly(assembly, includeInternalTypes: true);
 
