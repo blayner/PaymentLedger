@@ -9,9 +9,7 @@ namespace PaymentLedger.Integration.Tests.Infrastructure;
 /// </summary>
 public sealed class PostgresFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder()
-        .WithImage("postgres:18")
-        .Build();
+    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:18").Build();
 
     public async ValueTask InitializeAsync() => await _container.StartAsync();
 
