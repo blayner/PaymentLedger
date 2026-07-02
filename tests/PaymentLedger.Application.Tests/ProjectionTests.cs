@@ -9,6 +9,8 @@ namespace PaymentLedger.Application.Tests;
 
 public sealed class ProjectionTests
 {
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
     private readonly LedgerHarness _harness = new();
 
     [Fact]
@@ -18,7 +20,7 @@ public sealed class ProjectionTests
         await _harness.DepositAsync(alice, 80m);
         await _harness.WithdrawAsync(alice, 30m);
 
-        var model = (await _harness.AccountReadModels.GetAsync(alice, default)).ShouldNotBeNull();
+        var model = (await _harness.AccountReadModels.GetAsync(alice, Ct)).ShouldNotBeNull();
 
         model.Balance.ShouldBe(50m);
         model.TransactionCount.ShouldBe(2);
@@ -33,7 +35,7 @@ public sealed class ProjectionTests
         await _harness.DepositAsync(alice, 100m);
         var transfer = await _harness.TransferAsync(alice, bob, 40m);
 
-        var entries = await _harness.LedgerReadModels.GetByTransactionAsync(transfer.TransactionId, default);
+        var entries = await _harness.LedgerReadModels.GetByTransactionAsync(transfer.TransactionId, Ct);
 
         entries.Count.ShouldBe(2);
         entries.ShouldContain(e => e.AccountId == alice && e.EntryType == EntryType.Debit && e.Kind == "transfer_out", 1);
@@ -51,7 +53,7 @@ public sealed class ProjectionTests
         await _harness.WithdrawAsync(bob, 70m);
 
         var handler = new GetTrialBalanceQueryHandler(_harness.LedgerReadModels, _harness.Clock);
-        var trialBalance = await handler.Handle(new GetTrialBalanceQuery(), default);
+        var trialBalance = await handler.Handle(new GetTrialBalanceQuery(), Ct);
 
         trialBalance.IsBalanced.ShouldBeTrue();
         var line = trialBalance.Lines.ShouldHaveSingleItem();
@@ -66,16 +68,16 @@ public sealed class ProjectionTests
         var alice = await _harness.OpenAccountAsync();
         await _harness.DepositAsync(alice, 25m);
 
-        await _harness.AccountReadModels.ResetAsync(default);
-        await _harness.LedgerReadModels.ResetAsync(default);
+        await _harness.AccountReadModels.ResetAsync(Ct);
+        await _harness.LedgerReadModels.ResetAsync(Ct);
 
         var rebuilt = new ProjectionRunner(
             _harness.EventStore,
             [new AccountProjection(_harness.AccountReadModels), new LedgerProjection(_harness.LedgerReadModels)],
             NullLogger<ProjectionRunner>.Instance);
-        await rebuilt.CatchUpAsync(default);
+        await rebuilt.CatchUpAsync(Ct);
 
-        (await _harness.AccountReadModels.GetAsync(alice, default)).ShouldNotBeNull().Balance.ShouldBe(25m);
-        (await _harness.LedgerReadModels.GetByAccountAsync(alice, 1, 10, default)).TotalCount.ShouldBe(1);
+        (await _harness.AccountReadModels.GetAsync(alice, Ct)).ShouldNotBeNull().Balance.ShouldBe(25m);
+        (await _harness.LedgerReadModels.GetByAccountAsync(alice, 1, 10, Ct)).TotalCount.ShouldBe(1);
     }
 }

@@ -7,6 +7,8 @@ namespace PaymentLedger.Application.Tests;
 
 public sealed class MoneyMovementHandlerTests
 {
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
     private readonly LedgerHarness _harness = new();
 
     [Fact]
@@ -19,7 +21,7 @@ public sealed class MoneyMovementHandlerTests
         result.Balance.ShouldBe(150m);
         result.AlreadyProcessed.ShouldBeFalse();
 
-        var settlement = await _harness.Accounts.GetAsync(SystemAccounts.SettlementAccountId("BRL"), default);
+        var settlement = await _harness.Accounts.GetAsync(SystemAccounts.SettlementAccountId("BRL"), Ct);
         settlement.ShouldNotBeNull().Balance.Amount.ShouldBe(150m);
     }
 
@@ -34,7 +36,7 @@ public sealed class MoneyMovementHandlerTests
 
         replay.AlreadyProcessed.ShouldBeTrue();
         replay.Balance.ShouldBe(100m);
-        (await _harness.EventStore.ReadStreamAsync(alice)).Count.ShouldBe(2, "created + one deposit");
+        (await _harness.EventStore.ReadStreamAsync(alice, Ct)).Count.ShouldBe(2, "created + one deposit");
     }
 
     [Fact]
@@ -43,12 +45,12 @@ public sealed class MoneyMovementHandlerTests
         var alice = await _harness.OpenAccountAsync();
         await _harness.DepositAsync(alice, 40m);
         var settlementId = SystemAccounts.SettlementAccountId("BRL");
-        var settlementEventsBefore = (await _harness.EventStore.ReadStreamAsync(settlementId)).Count;
+        var settlementEventsBefore = (await _harness.EventStore.ReadStreamAsync(settlementId, Ct)).Count;
 
         var error = await Should.ThrowAsync<DomainException>(() => _harness.WithdrawAsync(alice, 40.01m));
 
         error.Code.ShouldBe("account.insufficient_funds");
-        (await _harness.EventStore.ReadStreamAsync(settlementId)).Count.ShouldBe(settlementEventsBefore);
+        (await _harness.EventStore.ReadStreamAsync(settlementId, Ct)).Count.ShouldBe(settlementEventsBefore);
     }
 
     [Fact]
@@ -59,7 +61,7 @@ public sealed class MoneyMovementHandlerTests
         var error = await Should.ThrowAsync<DomainException>(() => _harness.DepositAsync(alice, 10m, currency: "USD"));
 
         error.Code.ShouldBe("posting.currency_mismatch");
-        (await _harness.Accounts.GetAsync(SystemAccounts.SettlementAccountId("USD"), default)).ShouldBeNull();
+        (await _harness.Accounts.GetAsync(SystemAccounts.SettlementAccountId("USD"), Ct)).ShouldBeNull();
     }
 
     [Fact]
@@ -78,7 +80,7 @@ public sealed class MoneyMovementHandlerTests
         var result = await _harness.TransferAsync(alice, bob, 35.25m);
 
         result.Balance.ShouldBe(64.75m);
-        (await _harness.Accounts.GetAsync(bob, default)).ShouldNotBeNull().Balance.Amount.ShouldBe(35.25m);
+        (await _harness.Accounts.GetAsync(bob, Ct)).ShouldNotBeNull().Balance.Amount.ShouldBe(35.25m);
     }
 
     [Fact]
@@ -109,7 +111,7 @@ public sealed class MoneyMovementHandlerTests
         var alice = await _harness.OpenAccountAsync();
         await _harness.DepositAsync(alice, 10m);
 
-        var stats = await _harness.Outbox.GetStatsAsync(maxAttempts: 10, default);
+        var stats = await _harness.Outbox.GetStatsAsync(maxAttempts: 10, Ct);
 
         // created(alice) + created(settlement) + deposit on each side
         stats.PendingCount.ShouldBe(4);

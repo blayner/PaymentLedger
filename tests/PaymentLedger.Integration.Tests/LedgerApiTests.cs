@@ -10,7 +10,9 @@ namespace PaymentLedger.Integration.Tests;
 [Collection(PostgresCollection.Name)]
 public sealed class LedgerApiTests(PostgresFixture postgres) : IAsyncLifetime
 {
-    private PaymentLedgerApiFactory _factory = null!;
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    private PaymentLedgerApiFactory? _factory;
     private LedgerApiClient _api = null!;
 
     public async ValueTask InitializeAsync()
@@ -19,16 +21,22 @@ public sealed class LedgerApiTests(PostgresFixture postgres) : IAsyncLifetime
         _api = new LedgerApiClient(_factory.CreateClient());
     }
 
-    public async ValueTask DisposeAsync() => await _factory.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        if (_factory is not null)
+        {
+            await _factory.DisposeAsync();
+        }
+    }
 
     [Fact]
     public async Task Opening_an_account_returns_201_with_location()
     {
-        var response = await _api.Http.PostAsJsonAsync("/api/accounts", new { ownerName = "Alice", currency = "BRL" });
+        var response = await _api.Http.PostAsJsonAsync("/api/accounts", new { ownerName = "Alice", currency = "BRL" }, Ct);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
         response.Headers.Location.ShouldNotBeNull();
-        var account = (await response.Content.ReadFromJsonAsync<AccountDto>()).ShouldNotBeNull();
+        var account = (await response.Content.ReadFromJsonAsync<AccountDto>(Ct)).ShouldNotBeNull();
         account.Balance.ShouldBe(0m);
         account.Status.ShouldBe("Active");
     }
@@ -54,7 +62,7 @@ public sealed class LedgerApiTests(PostgresFixture postgres) : IAsyncLifetime
 
         first.StatusCode.ShouldBe(HttpStatusCode.Created);
         retry.StatusCode.ShouldBe(HttpStatusCode.OK);
-        (await retry.Content.ReadFromJsonAsync<TransactionResult>()).ShouldNotBeNull().AlreadyProcessed.ShouldBeTrue();
+        (await retry.Content.ReadFromJsonAsync<TransactionResult>(Ct)).ShouldNotBeNull().AlreadyProcessed.ShouldBeTrue();
         (await _api.GetBalanceAsync(alice.Id)).Balance.ShouldBe(100m);
     }
 
@@ -67,7 +75,7 @@ public sealed class LedgerApiTests(PostgresFixture postgres) : IAsyncLifetime
         var response = await _api.WithdrawAsync(alice.Id, 20.01m, Guid.NewGuid());
 
         response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
-        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
         problem.GetProperty("code").GetString().ShouldBe("account.insufficient_funds");
     }
 
@@ -79,7 +87,7 @@ public sealed class LedgerApiTests(PostgresFixture postgres) : IAsyncLifetime
         var response = await _api.DepositAsync(alice.Id, 10.001m, Guid.NewGuid(), currency: "brl");
 
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
-        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
         problem.GetProperty("errors").TryGetProperty("Amount", out _).ShouldBeTrue();
         problem.GetProperty("errors").TryGetProperty("Currency", out _).ShouldBeTrue();
     }
@@ -136,10 +144,10 @@ public sealed class LedgerApiTests(PostgresFixture postgres) : IAsyncLifetime
         await _api.DepositAsync(alice.Id, 42m, Guid.NewGuid());
 
         // A brand-new host on the same database starts with empty read models.
-        await using var restarted = new PaymentLedgerApiFactory(_factory.ConnectionString);
+        await using var restarted = new PaymentLedgerApiFactory(_factory!.ConnectionString);
         var client = restarted.CreateClient();
 
-        var account = await PollAsync(() => client.GetFromJsonAsync<AccountDto>($"/api/accounts/{alice.Id}"));
+        var account = await PollAsync(() => client.GetFromJsonAsync<AccountDto>($"/api/accounts/{alice.Id}", Ct));
 
         account.Balance.ShouldBe(42m);
     }
@@ -147,10 +155,10 @@ public sealed class LedgerApiTests(PostgresFixture postgres) : IAsyncLifetime
     [Fact]
     public async Task Readiness_reports_postgres_and_outbox()
     {
-        var response = await _api.Http.GetAsync("/health/ready");
+        var response = await _api.Http.GetAsync("/health/ready", Ct);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
-        var report = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var report = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
         var checks = report.GetProperty("checks").EnumerateArray().Select(c => c.GetProperty("name").GetString()).ToArray();
         checks.ShouldBe(new[] { "outbox", "postgres" }, ignoreOrder: true);
     }
@@ -161,7 +169,7 @@ public sealed class LedgerApiTests(PostgresFixture postgres) : IAsyncLifetime
         using var request = new HttpRequestMessage(HttpMethod.Get, "/health/live");
         request.Headers.Add("X-Correlation-Id", "test-correlation-123");
 
-        var response = await _api.Http.SendAsync(request);
+        var response = await _api.Http.SendAsync(request, Ct);
 
         response.Headers.GetValues("X-Correlation-Id").ShouldHaveSingleItem().ShouldBe("test-correlation-123");
     }

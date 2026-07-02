@@ -11,6 +11,8 @@ namespace PaymentLedger.Application.Tests;
 
 public sealed class BehaviorTests
 {
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
     private static readonly TransactionResult Ok = new(Guid.NewGuid(), Guid.NewGuid(), 10m, "BRL", false);
 
     private static DepositFundsCommand ValidDeposit() =>
@@ -29,7 +31,7 @@ public sealed class BehaviorTests
                 ? throw new ConcurrencyException(Guid.NewGuid(), 1, 2)
                 : Task.FromResult(Ok);
 
-        var result = await RetryBehavior<DepositFundsCommand, TransactionResult>().Handle(ValidDeposit(), next, default);
+        var result = await RetryBehavior<DepositFundsCommand, TransactionResult>().Handle(ValidDeposit(), next, Ct);
 
         result.ShouldBe(Ok);
         calls.ShouldBe(3);
@@ -46,7 +48,7 @@ public sealed class BehaviorTests
         };
 
         await Should.ThrowAsync<ConcurrencyException>(
-            () => RetryBehavior<DepositFundsCommand, TransactionResult>().Handle(ValidDeposit(), next, default));
+            () => RetryBehavior<DepositFundsCommand, TransactionResult>().Handle(ValidDeposit(), next, Ct));
 
         calls.ShouldBe(ConcurrencyRetryBehavior<DepositFundsCommand, TransactionResult>.MaxAttempts);
     }
@@ -62,7 +64,7 @@ public sealed class BehaviorTests
         };
 
         await Should.ThrowAsync<ConcurrencyException>(
-            () => RetryBehavior<CloseAccountCommand, Unit>().Handle(new CloseAccountCommand(Guid.NewGuid()), next, default));
+            () => RetryBehavior<CloseAccountCommand, Unit>().Handle(new CloseAccountCommand(Guid.NewGuid()), next, Ct));
 
         calls.ShouldBe(1);
     }
@@ -79,7 +81,7 @@ public sealed class BehaviorTests
         };
         var invalid = ValidDeposit() with { Amount = 10.005m, Currency = "brl" };
 
-        var error = await Should.ThrowAsync<ValidationException>(() => behavior.Handle(invalid, next, default));
+        var error = await Should.ThrowAsync<ValidationException>(() => behavior.Handle(invalid, next, Ct));
 
         error.Errors.Select(e => e.PropertyName).OrderBy(p => p, StringComparer.Ordinal).ToArray()
             .ShouldBe(new[] { "Amount", "Currency" });
