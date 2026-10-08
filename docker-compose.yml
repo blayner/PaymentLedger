@@ -20,9 +20,9 @@ services:
 
   # Traces, metrics and logs UI (OTLP receiver on 18889, dashboard on http://localhost:18888)
   dashboard:
-    image: mcr.microsoft.com/dotnet/aspire-dashboard:9.5
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:13.6
     environment:
-      DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
+      ASPIRE_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
     ports:
       - "18888:18888"
 
