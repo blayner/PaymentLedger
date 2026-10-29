@@ -13,7 +13,8 @@ namespace PaymentLedger.Domain.Accounts;
 /// </summary>
 public sealed class Account : AggregateRoot
 {
-    private readonly HashSet<Guid> _appliedTransactions = [];
+    // Transaction id -> request fingerprint (null for legacy events or internal postings).
+    private readonly Dictionary<Guid, string?> _appliedTransactions = [];
 
     private Account()
     {
@@ -49,7 +50,32 @@ public sealed class Account : AggregateRoot
     }
 
     /// <summary>True when the transaction has already moved this account's balance (idempotency check).</summary>
-    public bool HasApplied(Guid transactionId) => _appliedTransactions.Contains(transactionId);
+    public bool HasApplied(Guid transactionId) => _appliedTransactions.ContainsKey(transactionId);
+
+    /// <summary>
+    /// Classifies a request that carries an idempotency key: new, a replay of the request
+    /// that was already applied, or a reuse of the key with a different payload.
+    /// </summary>
+    public IdempotencyCheck CheckIdempotency(Guid transactionId, string requestFingerprint)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(requestFingerprint);
+
+        if (!_appliedTransactions.TryGetValue(transactionId, out var stored))
+        {
+            return IdempotencyCheck.NotApplied;
+        }
+
+        // Events written before fingerprints existed cannot be compared; accept them as replays
+        // rather than rejecting retries of requests that really were identical.
+        if (stored is null)
+        {
+            return IdempotencyCheck.Replay;
+        }
+
+        return string.Equals(stored, requestFingerprint, StringComparison.Ordinal)
+            ? IdempotencyCheck.Replay
+            : IdempotencyCheck.PayloadMismatch;
+    }
 
     public void Freeze(string reason)
     {
@@ -95,13 +121,25 @@ public sealed class Account : AggregateRoot
         IDomainEvent @event = (transaction.Kind, increases) switch
         {
             (TransactionKind.Transfer, false) => new TransferInitiatedEvent(
-                Id, transaction.Id, entry.Type, amount, Currency, newBalance.Amount, transaction.Description, counterparty),
+                Id, transaction.Id, entry.Type, amount, Currency, newBalance.Amount, transaction.Description, counterparty)
+            {
+                RequestFingerprint = transaction.RequestFingerprint,
+            },
             (TransactionKind.Transfer, true) => new TransferReceivedEvent(
-                Id, transaction.Id, entry.Type, amount, Currency, newBalance.Amount, transaction.Description, counterparty),
+                Id, transaction.Id, entry.Type, amount, Currency, newBalance.Amount, transaction.Description, counterparty)
+            {
+                RequestFingerprint = transaction.RequestFingerprint,
+            },
             (_, true) => new FundsDepositedEvent(
-                Id, transaction.Id, entry.Type, amount, Currency, newBalance.Amount, transaction.Description),
+                Id, transaction.Id, entry.Type, amount, Currency, newBalance.Amount, transaction.Description)
+            {
+                RequestFingerprint = transaction.RequestFingerprint,
+            },
             (_, false) => new FundsWithdrawnEvent(
-                Id, transaction.Id, entry.Type, amount, Currency, newBalance.Amount, transaction.Description),
+                Id, transaction.Id, entry.Type, amount, Currency, newBalance.Amount, transaction.Description)
+            {
+                RequestFingerprint = transaction.RequestFingerprint,
+            },
         };
 
         Raise(@event);
@@ -123,7 +161,7 @@ public sealed class Account : AggregateRoot
                 break;
             case BalanceChangedEvent e:
                 Balance = new Money(e.BalanceAfter, Currency);
-                _appliedTransactions.Add(e.TransactionId);
+                _appliedTransactions[e.TransactionId] = e.RequestFingerprint;
                 break;
             case AccountFrozenEvent:
                 Status = AccountStatus.Frozen;

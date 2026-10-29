@@ -49,9 +49,10 @@ internal sealed class LedgerHarness
     public Task<Guid> OpenAccountAsync(string owner = "Alice", string currency = "BRL") =>
         new CreateAccountCommandHandler(Accounts).Handle(new CreateAccountCommand(owner, currency), CancellationToken.None);
 
-    public Task<TransactionResult> DepositAsync(Guid accountId, decimal amount, Guid? transactionId = null, string currency = "BRL") =>
+    public Task<TransactionResult> DepositAsync(
+        Guid accountId, decimal amount, Guid? transactionId = null, string currency = "BRL", string? description = null) =>
         new DepositFundsCommandHandler(Accounts, Posting, Clock).Handle(
-            new DepositFundsCommand(accountId, amount, currency, transactionId ?? Guid.NewGuid(), null),
+            new DepositFundsCommand(accountId, amount, currency, transactionId ?? Guid.NewGuid(), description),
             CancellationToken.None);
 
     public Task<TransactionResult> WithdrawAsync(Guid accountId, decimal amount, Guid? transactionId = null, string currency = "BRL") =>

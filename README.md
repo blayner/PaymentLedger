@@ -102,8 +102,11 @@ sequenceDiagram
     API->>P: TransferFundsCommand(TransactionId = key)
     P->>H: handle
     H->>ES: read source + destination streams
-    alt source already applied this TransactionId
+    H->>H: fingerprint = SHA-256(canonical request)
+    alt key already applied with the same fingerprint
         H-->>C: 200 OK (AlreadyProcessed = true)
+    else key already applied with a different fingerprint
+        H-->>C: 422 idempotency-key-reused
     end
     H->>D: PostingRules.Transfer → balanced Transaction
     D->>D: validate every entry, then apply (raise events)
@@ -132,7 +135,7 @@ sequenceDiagram
 
 | Concern | Mechanism |
 | --- | --- |
-| Duplicate requests | `Idempotency-Key` header becomes the transaction id. Aggregates remember applied transaction ids; replays return `200` with `alreadyProcessed: true`. |
+| Duplicate requests | `Idempotency-Key` header becomes the transaction id. Aggregates remember each applied transaction id together with a SHA-256 fingerprint of the request; an identical retry returns `200` with `alreadyProcessed: true`, and the same key with a different payload returns `422` ([ADR-0007](docs/adr/0007-idempotency-key-fingerprints.md)). |
 | Lost updates | Optimistic concurrency on every stream (`expected version`), plus a unique `(stream_id, version)` constraint. |
 | Partial transfers | Multi-stream append in one database transaction: both accounts change or neither does. |
 | Hot settlement stream | `ConcurrencyRetryBehavior` re-runs marked commands on conflict, with jittered backoff. |
@@ -158,6 +161,25 @@ sequenceDiagram
 
 Errors are RFC 7807 problem details. Business-rule violations return `422` with a stable `code`
 (for example `account.insufficient_funds`), so clients branch on the code rather than the message.
+
+### Idempotency
+
+Every money movement requires an `Idempotency-Key` header (a UUID). The key becomes the
+transaction id, and the server stores a fingerprint of the request next to it: the SHA-256 of a
+versioned, canonical form of the fields that move money (operation, account ids, amount with
+trailing zeros removed, upper-cased currency). The free-text `description` is not part of it.
+
+| Situation | Response |
+| --- | --- |
+| New key | `201 Created`, `alreadyProcessed: false` |
+| Same key, same payload (a retry) | `200 OK` with the original transaction id and `alreadyProcessed: true`; nothing is posted again |
+| Same key, different payload | `422` problem with `type: urn:paymentledger:problem:idempotency-key-reused` and `code: idempotency.key_reused`; nothing is posted |
+| Same key sent concurrently | Exactly one request posts (`201`); the others lose the optimistic-concurrency race, are retried and answer `200` |
+| Header missing | `400` |
+
+Fingerprints are stored in the balance-changed events themselves, so they survive restarts and
+need no extra table. See [ADR-0007](docs/adr/0007-idempotency-key-fingerprints.md) for the
+reasoning and the known limits.
 In Development the OpenAPI document is served at `/openapi/v1.json`. `requests.http` walks through
 the main flows.
 
@@ -225,6 +247,7 @@ shows how much the per-currency settlement stream is costing ([ADR-0004](docs/ad
 | [0004](docs/adr/0004-serialised-appends-and-atomic-multi-stream-writes.md) | Serialised appends and atomic multi-stream writes instead of a saga |
 | [0005](docs/adr/0005-transactional-outbox.md) | Transactional outbox for integration events |
 | [0006](docs/adr/0006-in-house-dispatcher-and-test-libraries.md) | In-house dispatcher (no MediatR) and permissively licensed test libraries |
+| [0007](docs/adr/0007-idempotency-key-fingerprints.md) | Idempotency keys checked against request fingerprints |
 
 ## Known limitations
 
@@ -235,8 +258,15 @@ shows how much the per-currency settlement stream is costing ([ADR-0004](docs/ad
   is the next step if it becomes the bottleneck.
 - The settlement account per currency is a hot stream. Splitting it into several sub-accounts
   (summed for reporting) would spread contention.
-- Applied transaction ids live in aggregate state, so very long-lived accounts would benefit from
-  snapshots and a bounded idempotency window.
+- Applied transaction ids and their fingerprints live in aggregate state, so very long-lived
+  accounts would benefit from snapshots and a bounded idempotency window (keys expire after N days,
+  as Stripe does).
+- Keys are not scoped per client. Reuse across accounts is caught when the two requests share an
+  account (the settlement account, for deposits and withdrawals in the same currency), but a key
+  reused for a transfer between two unrelated pairs of accounts is not detected. A real deployment
+  would store keys per API client in their own table ([ADR-0007](docs/adr/0007-idempotency-key-fingerprints.md)).
+- A replay returns the account's current balance, not the balance right after the original
+  request; storing full responses would make replays byte-for-byte identical.
 - The default publisher logs messages; a broker adapter (RabbitMQ, Kafka) implements
   `IIntegrationEventPublisher`.
 - Single currency per account; FX is out of scope.

@@ -19,7 +19,8 @@ public static class PostingRules
         Guid settlementAccountId,
         Money amount,
         string description,
-        DateTimeOffset occurredAt) =>
+        DateTimeOffset occurredAt,
+        string? requestFingerprint = null) =>
         Transaction.Create(
             transactionId,
             TransactionKind.Deposit,
@@ -28,7 +29,8 @@ public static class PostingRules
                 new LedgerEntry(settlementAccountId, EntryType.Debit, amount),
                 new LedgerEntry(customerAccountId, EntryType.Credit, amount),
             ],
-            occurredAt);
+            occurredAt,
+            requestFingerprint);
 
     public static Transaction Withdrawal(
         Guid transactionId,
@@ -36,7 +38,8 @@ public static class PostingRules
         Guid settlementAccountId,
         Money amount,
         string description,
-        DateTimeOffset occurredAt) =>
+        DateTimeOffset occurredAt,
+        string? requestFingerprint = null) =>
         Transaction.Create(
             transactionId,
             TransactionKind.Withdrawal,
@@ -45,7 +48,8 @@ public static class PostingRules
                 new LedgerEntry(customerAccountId, EntryType.Debit, amount),
                 new LedgerEntry(settlementAccountId, EntryType.Credit, amount),
             ],
-            occurredAt);
+            occurredAt,
+            requestFingerprint);
 
     public static Transaction Transfer(
         Guid transactionId,
@@ -53,7 +57,8 @@ public static class PostingRules
         Guid destinationAccountId,
         Money amount,
         string description,
-        DateTimeOffset occurredAt) =>
+        DateTimeOffset occurredAt,
+        string? requestFingerprint = null) =>
         Transaction.Create(
             transactionId,
             TransactionKind.Transfer,
@@ -62,5 +67,6 @@ public static class PostingRules
                 new LedgerEntry(sourceAccountId, EntryType.Debit, amount),
                 new LedgerEntry(destinationAccountId, EntryType.Credit, amount),
             ],
-            occurredAt);
+            occurredAt,
+            requestFingerprint);
 }

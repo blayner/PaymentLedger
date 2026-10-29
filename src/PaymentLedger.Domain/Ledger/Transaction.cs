@@ -16,7 +16,8 @@ public sealed class Transaction
         string description,
         DateTimeOffset occurredAt,
         IReadOnlyList<LedgerEntry> entries,
-        Money total)
+        Money total,
+        string? requestFingerprint)
     {
         Id = id;
         Kind = kind;
@@ -24,6 +25,7 @@ public sealed class Transaction
         OccurredAt = occurredAt;
         Entries = entries;
         Total = total;
+        RequestFingerprint = requestFingerprint;
     }
 
     public Guid Id { get; }
@@ -41,12 +43,20 @@ public sealed class Transaction
 
     public string Currency => Total.Currency;
 
+    /// <summary>
+    /// SHA-256 of the canonical request that produced this transaction. Stored with the
+    /// balance-changed events so a reused idempotency key can be told apart from a replay.
+    /// Null for transactions created without a client request (and for legacy events).
+    /// </summary>
+    public string? RequestFingerprint { get; }
+
     public static Transaction Create(
         Guid id,
         TransactionKind kind,
         string description,
         IEnumerable<LedgerEntry> entries,
-        DateTimeOffset occurredAt)
+        DateTimeOffset occurredAt,
+        string? requestFingerprint = null)
     {
         ArgumentNullException.ThrowIfNull(entries);
 
@@ -89,7 +99,8 @@ public sealed class Transaction
             string.IsNullOrWhiteSpace(description) ? kind.ToString() : description.Trim(),
             occurredAt,
             list,
-            debits);
+            debits,
+            string.IsNullOrWhiteSpace(requestFingerprint) ? null : requestFingerprint);
     }
 
     private static Money Sum(IEnumerable<LedgerEntry> entries, EntryType type, string currency) =>

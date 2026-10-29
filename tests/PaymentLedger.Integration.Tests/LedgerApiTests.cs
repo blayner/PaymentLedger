@@ -67,6 +67,59 @@ public sealed class LedgerApiTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Reusing_a_key_with_a_different_payload_returns_422_and_moves_no_money()
+    {
+        var alice = await _api.OpenAccountAsync("Alice");
+        var key = Guid.NewGuid();
+        (await _api.DepositAsync(alice.Id, 100m, key)).StatusCode.ShouldBe(HttpStatusCode.Created);
+
+        var reused = await _api.DepositAsync(alice.Id, 250m, key);
+
+        reused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        reused.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
+        var problem = await reused.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        problem.GetProperty("type").GetString().ShouldBe("urn:paymentledger:problem:idempotency-key-reused");
+        problem.GetProperty("code").GetString().ShouldBe("idempotency.key_reused");
+        (await _api.GetBalanceAsync(alice.Id)).Balance.ShouldBe(100m);
+    }
+
+    [Fact]
+    public async Task Fingerprints_survive_a_restart_because_they_live_in_the_event_store()
+    {
+        var alice = await _api.OpenAccountAsync("Alice");
+        var key = Guid.NewGuid();
+        (await _api.DepositAsync(alice.Id, 30m, key)).EnsureSuccessStatusCode();
+
+        // A new host rebuilds every aggregate from PostgreSQL; nothing is cached in memory.
+        await using var restarted = new PaymentLedgerApiFactory(_factory!.ConnectionString);
+        var api = new LedgerApiClient(restarted.CreateClient());
+
+        (await api.DepositAsync(alice.Id, 30.00m, key)).StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await api.DepositAsync(alice.Id, 31m, key)).StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await api.WithdrawAsync(alice.Id, 30m, key)).StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+    }
+
+    [Fact]
+    public async Task Concurrent_requests_with_the_same_key_apply_exactly_once()
+    {
+        var alice = await _api.OpenAccountAsync("Alice");
+        var key = Guid.NewGuid();
+        var statuses = new ConcurrentBag<HttpStatusCode>();
+
+        // All requests load the account before any of them commits. The serialised append with an
+        // expected version lets only one write win; the others get a concurrency conflict, are
+        // retried, reload the account and find the transaction already applied.
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, 8),
+            new ParallelOptions { MaxDegreeOfParallelism = 8 },
+            async (_, _) => statuses.Add((await _api.DepositAsync(alice.Id, 50m, key)).StatusCode));
+
+        statuses.Count(s => s == HttpStatusCode.Created).ShouldBe(1);
+        statuses.Count(s => s == HttpStatusCode.OK).ShouldBe(7);
+        (await _api.GetBalanceAsync(alice.Id)).Balance.ShouldBe(50m);
+    }
+
+    [Fact]
     public async Task Overdraft_is_rejected_with_a_stable_error_code()
     {
         var alice = await _api.OpenAccountAsync("Alice");

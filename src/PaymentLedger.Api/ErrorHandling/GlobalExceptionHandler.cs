@@ -13,6 +13,9 @@ namespace PaymentLedger.Api.ErrorHandling;
 /// </summary>
 public sealed class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger) : IExceptionHandler
 {
+    /// <summary>Problem type URI for a reused idempotency key (draft-ietf-httpapi-idempotency-key-header).</summary>
+    public const string IdempotencyKeyReusedType = "urn:paymentledger:problem:idempotency-key-reused";
+
     public async ValueTask<bool> TryHandleAsync(HttpContext httpContext, Exception exception, CancellationToken cancellationToken)
     {
         ProblemDetails problem = exception switch
@@ -31,6 +34,15 @@ public sealed class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logge
                 Title = $"{notFound.Resource} not found",
                 Detail = notFound.Message,
             },
+            IdempotencyKeyReusedException reused => WithCode(
+                new ProblemDetails
+                {
+                    Type = IdempotencyKeyReusedType,
+                    Status = StatusCodes.Status422UnprocessableEntity,
+                    Title = "Idempotency key reused with a different payload",
+                    Detail = $"{reused.Message} Use a new key for a new operation, or resend the original payload to get the original result.",
+                },
+                "idempotency.key_reused"),
             DomainException domain => WithCode(
                 new ProblemDetails
                 {

@@ -21,6 +21,13 @@ Idempotency-Key: 7d0c6f3e-2a51-4f5e-9a0b-0d2b1c3e4f50
 
 { "amount": 250.00, "currency": "BRL", "description": "Initial top-up" }
 
+### Same key, different amount: 422 idempotency-key-reused, nothing is posted
+POST {{baseUrl}}/api/accounts/{{alice.response.body.id}}/deposits
+Content-Type: application/json
+Idempotency-Key: 7d0c6f3e-2a51-4f5e-9a0b-0d2b1c3e4f50
+
+{ "amount": 999.00, "currency": "BRL", "description": "Initial top-up" }
+
 ### Transfer
 POST {{baseUrl}}/api/transfers
 Content-Type: application/json

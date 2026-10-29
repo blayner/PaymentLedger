@@ -35,12 +35,15 @@ public sealed class TransferFundsCommandHandler(
 
         var source = await accounts.GetRequiredAsync(request.SourceAccountId, cancellationToken);
 
-        if (source.HasApplied(request.TransactionId))
+        var fingerprint = RequestFingerprints.For(request);
+
+        if (IdempotencyGuard.IsReplay(source, request.TransactionId, fingerprint))
         {
             return new TransactionResult(request.TransactionId, source.Id, source.Balance.Amount, source.Currency, AlreadyProcessed: true);
         }
 
         var destination = await accounts.GetRequiredAsync(request.DestinationAccountId, cancellationToken);
+        IdempotencyGuard.EnsureCounterpartIsConsistent(source, destination, request.TransactionId, fingerprint);
 
         if (source.IsSystemAccount || destination.IsSystemAccount)
         {
@@ -53,7 +56,8 @@ public sealed class TransferFundsCommandHandler(
             destination.Id,
             new Money(request.Amount, request.Currency),
             request.Description ?? "Transfer",
-            clock.GetUtcNow());
+            clock.GetUtcNow(),
+            fingerprint);
 
         posting.Post(transaction, [source, destination]);
         await accounts.SaveAsync([source, destination], cancellationToken);

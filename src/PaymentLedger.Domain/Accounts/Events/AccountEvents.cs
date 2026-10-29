@@ -22,7 +22,15 @@ public abstract record BalanceChangedEvent(
     decimal Amount,
     string Currency,
     decimal BalanceAfter,
-    string Description) : DomainEvent;
+    string Description) : DomainEvent
+{
+    /// <summary>
+    /// Fingerprint of the client request behind the transaction (see ADR-0007).
+    /// Optional so events written before it existed still deserialize; null means
+    /// "unknown", and such transactions are treated as plain replays.
+    /// </summary>
+    public string? RequestFingerprint { get; init; }
+}
 
 public sealed record FundsDepositedEvent(
     Guid AccountId,

@@ -24,12 +24,15 @@ public sealed class DepositFundsCommandHandler(
     {
         var customer = await accounts.GetRequiredAsync(request.AccountId, cancellationToken);
 
-        if (customer.HasApplied(request.TransactionId))
+        var fingerprint = RequestFingerprints.For(request);
+
+        if (IdempotencyGuard.IsReplay(customer, request.TransactionId, fingerprint))
         {
             return new TransactionResult(request.TransactionId, customer.Id, customer.Balance.Amount, customer.Currency, AlreadyProcessed: true);
         }
 
         var settlement = await accounts.GetOrOpenSettlementAsync(request.Currency, cancellationToken);
+        IdempotencyGuard.EnsureCounterpartIsConsistent(customer, settlement, request.TransactionId, fingerprint);
 
         var transaction = PostingRules.Deposit(
             request.TransactionId,
@@ -37,7 +40,8 @@ public sealed class DepositFundsCommandHandler(
             settlement.Id,
             new Money(request.Amount, request.Currency),
             request.Description ?? "Deposit",
-            clock.GetUtcNow());
+            clock.GetUtcNow(),
+            fingerprint);
 
         posting.Post(transaction, [customer, settlement]);
         await accounts.SaveAsync([customer, settlement], cancellationToken);
