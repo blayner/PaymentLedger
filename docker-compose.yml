@@ -18,7 +18,8 @@ services:
       timeout: 3s
       retries: 10
 
-  # Traces, metrics and logs UI (OTLP receiver on 18889, dashboard on http://localhost:18888)
+  # Traces and metrics UI (OTLP/gRPC receiver on 18889, dashboard on http://localhost:18888).
+  # Logs stay in Serilog JSON on stdout (docker compose logs api); they are not exported over OTLP.
   dashboard:
     image: mcr.microsoft.com/dotnet/aspire-dashboard:13.6
     environment:

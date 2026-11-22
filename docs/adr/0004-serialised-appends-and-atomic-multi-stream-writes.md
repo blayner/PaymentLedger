@@ -26,6 +26,12 @@ commits. If transaction A takes position 10 and B takes 11, and B commits first,
 - Optimistic concurrency conflicts (stale reads) are retried by `ConcurrencyRetryBehavior` for
   commands that opt in with `IRetryOnConcurrency`. Their handlers reload state on every attempt and
   are idempotent on their transaction id.
+- Retries use capped exponential backoff with full jitter (window 5 ms → 250 ms, up to 8 attempts).
+
+> **Update (2026-11):** the first version used a linear 1–10·n ms jitter with 5 attempts. Running the
+> integration suite against Postgres in Docker Desktop on Windows exhausted that budget on the hot
+> settlement stream and returned 409 for valid deposits. The budget now grows exponentially and is
+> capped, which keeps the common case fast while giving contended writers room to drain.
 
 ## Consequences
 

@@ -17,7 +17,10 @@ public sealed class ConcurrencyRetryBehavior<TRequest, TResponse>(
     : IPipelineBehavior<TRequest, TResponse>
     where TRequest : notnull
 {
-    public const int MaxAttempts = 5;
+    public const int MaxAttempts = 8;
+
+    private const int BaseDelayMs = 5;
+    private const int MaxDelayMs = 250;
 
     public async Task<TResponse> Handle(
         TRequest request,
@@ -52,7 +55,13 @@ public sealed class ConcurrencyRetryBehavior<TRequest, TResponse>(
         }
     }
 
-    // Linear backoff with full jitter keeps competing writers from retrying in lockstep.
-    private static TimeSpan Backoff(int attempt) =>
-        TimeSpan.FromMilliseconds(Random.Shared.Next(1, 10 * attempt + 1));
+    // Capped exponential backoff with full jitter: the window doubles each attempt (5, 10, 20 … 250 ms)
+    // so competing writers spread out instead of retrying in lockstep. A linear 10 ms step with only
+    // five attempts was exhausted under real contention on a slower Postgres (Docker Desktop on
+    // Windows), surfacing 409s for deposits that should simply have waited their turn.
+    internal static TimeSpan Backoff(int attempt)
+    {
+        var ceiling = Math.Min(MaxDelayMs, BaseDelayMs << Math.Min(attempt, 16));
+        return TimeSpan.FromMilliseconds(Random.Shared.Next(1, ceiling + 1));
+    }
 }

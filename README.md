@@ -138,7 +138,7 @@ sequenceDiagram
 | Duplicate requests | `Idempotency-Key` header becomes the transaction id. Aggregates remember each applied transaction id together with a SHA-256 fingerprint of the request; an identical retry returns `200` with `alreadyProcessed: true`, and the same key with a different payload returns `422` ([ADR-0007](docs/adr/0007-idempotency-key-fingerprints.md)). |
 | Lost updates | Optimistic concurrency on every stream (`expected version`), plus a unique `(stream_id, version)` constraint. |
 | Partial transfers | Multi-stream append in one database transaction: both accounts change or neither does. |
-| Hot settlement stream | `ConcurrencyRetryBehavior` re-runs marked commands on conflict, with jittered backoff. |
+| Hot settlement stream | `ConcurrencyRetryBehavior` re-runs marked commands on conflict (up to 8 attempts, capped exponential backoff with full jitter, 5 → 250 ms). |
 | Lost integration events | Transactional outbox written with the events; at-least-once delivery, event id as dedup key. |
 | Out-of-order projection | Appends take a transaction-scoped advisory lock so `global_position` is committed in order ([ADR-0004](docs/adr/0004-serialised-appends-and-atomic-multi-stream-writes.md)). |
 
